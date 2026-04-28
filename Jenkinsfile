@@ -21,14 +21,6 @@ pipeline {
     }
 
     stages {
-
-        // ───────────── Clean Docker (non-fatal) ─────────────
-        stage('Clean Docker') {
-            steps {
-                sh 'docker system prune -f || true'
-            }
-        }
-
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
