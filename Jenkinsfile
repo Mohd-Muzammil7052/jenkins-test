@@ -35,7 +35,14 @@ pipeline {
         stage('Branch Info') {
             steps {
                 script {
-                    echo "Branch: ${env.BRANCH_NAME}"
+                    env.GIT_BRANCH_NAME = sh(
+                        script: 'git rev-parse --abbrev-ref HEAD',
+                        returnStdout: true
+                        ).trim()
+
+                    env.IS_DEPLOY_BRANCH = (env.GIT_BRANCH_NAME ==~ /(main|master|release\/.*)/) ? 'true' : 'false'
+
+                    echo "Branch: ${env.GIT_BRANCH_NAME}"
                     echo "CD will run: ${env.IS_DEPLOY_BRANCH}"
                 }
             }
@@ -122,7 +129,7 @@ pipeline {
         }
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health || exit 1"],
+        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/health || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
