@@ -21,6 +21,15 @@ pipeline {
     }
 
     stages {
+        // ───────────── Build Jar File ─────────────
+        stage('Build JAR') {
+            steps {
+                sh '''
+                mvn clean package -DskipTests
+                ls -l target
+                '''
+            }
+        }
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
