@@ -26,7 +26,7 @@ pipeline {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
 
         // true when branch is main, master, or release/*
-        IS_DEPLOY_BRANCH = "${env.BRANCH_NAME ==~ /(main|master|release\/.*)/ ? 'true' : 'false'}"
+        IS_DEPLOY_BRANCH = "${env.GIT_BRANCH ==~ /(origin\/main|origin\/master|origin\/release\/.*)/ ? 'true' : 'false'}"
     }
 
     stages {
