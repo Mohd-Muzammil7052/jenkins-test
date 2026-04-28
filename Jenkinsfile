@@ -9,6 +9,7 @@ pipeline {
 
     environment {
         AWS_REGION = 'ap-south-1'
+        AWS_DEFAULT_REGION = 'ap-south-1' 
 
         ACCOUNT_ID = '169984788524'
         ECR_REPO = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/my-app"
@@ -117,6 +118,7 @@ echo "======================"
                         env.TASK_REVISION = sh(
                             script: '''
                             aws ecs register-task-definition \
+                            --region $AWS_REGION \
                             --cli-input-json file://task-def.json \
                             --query 'taskDefinition.revision' \
                             --output text
@@ -140,6 +142,7 @@ echo "======================"
                     sh '''
                     echo "Deploying to ECS..."
                     aws ecs update-service \
+                    --region $AWS_REGION \
                     --cluster $ECS_CLUSTER \
                     --service $ECS_SERVICE \
                     --task-definition $TASK_FAMILY:$TASK_REVISION \
@@ -159,6 +162,7 @@ echo "======================"
                     sh '''
                     echo "Waiting for ECS service to stabilize..."
                     aws ecs wait services-stable \
+                    --region $AWS_REGION \
                     --cluster $ECS_CLUSTER \
                     --services $ECS_SERVICE
                     '''
