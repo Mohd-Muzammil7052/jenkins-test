@@ -23,7 +23,7 @@ pipeline {
         // ───────────── Clean Docker ─────────────
         stage('Clean Docker') {
             steps {
-                bat 'docker system prune -f || true'
+                bat 'docker system prune -f'
             }
         }
 
