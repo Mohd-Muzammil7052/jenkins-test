@@ -21,6 +21,7 @@ pipeline {
     }
 
     stages {
+
         // ───────────── Build Jar File ─────────────
         stage('Build JAR') {
             steps {
@@ -31,6 +32,7 @@ pipeline {
                 '''
             }
         }
+
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
@@ -46,9 +48,7 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-jenkins-DEP-team2-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
                     sh '''
                     echo "Logging into ECR..."
@@ -69,37 +69,39 @@ pipeline {
         stage('Prepare Task Definition') {
             steps {
                 sh '''
-                cat > task-def.json <<EOF
-                {
-                  "family": "$TASK_FAMILY",
-                  "networkMode": "awsvpc",
-                  "requiresCompatibilities": ["FARGATE"],
-                  "cpu": "256",
-                  "memory": "512",
-                  "containerDefinitions": [
-                    {
-                      "name": "my-app",
-                      "image": "$ECR_REPO:$IMAGE_TAG",
-                      "portMappings": [
-                        {
-                          "containerPort": 8080,
-                          "protocol": "tcp"
-                        }
-                      ],
-                      "essential": true,
-                      "healthCheck": {
-                        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/health || exit 1"],
-                        "interval": 30,
-                        "timeout": 5,
-                        "retries": 3,
-                        "startPeriod": 10
-                      }
-                    }
-                  ]
-                }
-                EOF
+cat > task-def.json <<EOF
+{
+  "family": "$TASK_FAMILY",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "my-app",
+      "image": "$ECR_REPO:$IMAGE_TAG",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      }
+    }
+  ]
+}
+EOF
 
-                cat task-def.json
+echo "====== TASK DEF ======"
+cat task-def.json
+echo "======================"
                 '''
             }
         }
@@ -109,9 +111,7 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-jenkins-DEP-team2-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
                     script {
                         env.TASK_REVISION = sh(
@@ -135,9 +135,7 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-jenkins-DEP-team2-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
                     sh '''
                     echo "Deploying to ECS..."
@@ -156,9 +154,7 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-jenkins-DEP-team2-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
                     sh '''
                     echo "Waiting for ECS service to stabilize..."
