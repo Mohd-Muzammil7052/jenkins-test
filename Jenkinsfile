@@ -36,7 +36,7 @@ pipeline {
             steps {
                 script {
                     env.GIT_BRANCH_NAME = sh(
-                        script: 'git rev-parse --abbrev-ref HEAD',
+                        script: 'git log -1 --format=%D | grep -oP "origin/\\K[^ ,]+"',
                         returnStdout: true
                         ).trim()
 
@@ -105,8 +105,8 @@ pipeline {
   "family": "${env.TASK_FAMILY}",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
-  "cpu": "256",
-  "memory": "512",
+  "cpu": "512",
+  "memory": "1024",
   "executionRoleArn": "${env.EXECUTION_ROLE_ARN}",
   "taskRoleArn": "${env.TASK_ROLE_ARN}",
   "containerDefinitions": [
@@ -193,7 +193,7 @@ pipeline {
                         --cluster ${env.ECS_CLUSTER} \
                         --service ${env.ECS_SERVICE} \
                         --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} \
-                        --health-check-grace-period-seconds 60 \
+                        --health-check-grace-period-seconds 120 \
                         --force-new-deployment
                     """
                 }
