@@ -1,10 +1,12 @@
 pipeline {
-    agent any
+    agent {
+        label 'linux'
+    }
 
     options {
         timestamps()
-        disableConcurrentBuilds()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()               // prevent overlapping deployments
+        buildDiscarder(logRotator(numToKeepStr: '10')) // keep last 10 builds
     }
 
     environment {
@@ -23,6 +25,7 @@ pipeline {
 
         IMAGE_TAG = "${env.BUILD_NUMBER}"
 
+        // true when branch is main, master, or release/*
         IS_DEPLOY_BRANCH = "${env.GIT_BRANCH ==~ /(origin\/main|origin\/master|origin\/release\/.*)/ ? 'true' : 'false'}"
     }
 
@@ -32,17 +35,10 @@ pipeline {
         stage('Branch Info') {
             steps {
                 script {
-                    if (isUnix()) {
-                        env.GIT_BRANCH_NAME = sh(
-                            script: 'git log -1 --format=%D | grep -oP "origin/\\K[^ ,]+"',
-                            returnStdout: true
+                    env.GIT_BRANCH_NAME = sh(
+                        script: 'git log -1 --format=%D | grep -oP "origin/\\K[^ ,]+"',
+                        returnStdout: true
                         ).trim()
-                    } else {
-                        env.GIT_BRANCH_NAME = bat(
-                            script: '@git log -1 --format=%%D',
-                            returnStdout: true
-                        ).trim().replaceAll(/.*origin\//, '').replaceAll(/,.*/, '').trim()
-                    }
 
                     env.IS_DEPLOY_BRANCH = (env.GIT_BRANCH_NAME ==~ /(main|master|release\/.*)/) ? 'true' : 'false'
 
@@ -55,37 +51,25 @@ pipeline {
         // ───────────── Build Jar File ─────────────
         stage('Build JAR') {
             steps {
-                script {
-                    if (isUnix()) {
-                        sh '''
-                        chmod +x mvnw
-                        ./mvnw clean package -DskipTests
-                        ls -l target
-                        '''
-                    } else {
-                        bat '''
-                        mvnw.cmd clean package -DskipTests
-                        dir target
-                        '''
-                    }
-                }
+                sh '''
+                chmod +x mvnw
+                ./mvnw clean package -DskipTests
+                ls -l target
+                '''
             }
         }
 
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
-                script {
-                    if (isUnix()) {
-                        sh "docker build -t my-app:${env.IMAGE_TAG} ."
-                    } else {
-                        bat "docker build -t my-app:${env.IMAGE_TAG} ."
-                    }
-                }
+                sh '''
+                docker build -t my-app:$IMAGE_TAG .
+                '''
             }
         }
 
         // ───────────── Push to ECR ─────────────
+        // Only push if on a deploy branch
         stage('Push to ECR') {
             when {
                 expression { env.IS_DEPLOY_BRANCH == 'true' }
@@ -95,32 +79,17 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
-                    script {
-                        if (isUnix()) {
-                            sh '''
-                            echo "Logging into ECR..."
-                            aws ecr get-login-password --region $AWS_REGION \
-                            | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                    sh '''
+                    echo "Logging into ECR..."
+                    aws ecr get-login-password --region $AWS_REGION \
+                    | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-                            echo "Tagging image..."
-                            docker tag my-app:$IMAGE_TAG $ECR_REPO:$IMAGE_TAG
+                    echo "Tagging image..."
+                    docker tag my-app:$IMAGE_TAG $ECR_REPO:$IMAGE_TAG
 
-                            echo "Pushing image..."
-                            docker push $ECR_REPO:$IMAGE_TAG
-                            '''
-                        } else {
-                            bat """
-                            echo Logging into ECR...
-                            aws ecr get-login-password --region %AWS_REGION% | docker login --username AWS --password-stdin %ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com
-
-                            echo Tagging image...
-                            docker tag my-app:%IMAGE_TAG% %ECR_REPO%:%IMAGE_TAG%
-
-                            echo Pushing image...
-                            docker push %ECR_REPO%:%IMAGE_TAG%
-                            """
-                        }
-                    }
+                    echo "Pushing image..."
+                    docker push $ECR_REPO:$IMAGE_TAG
+                    '''
                 }
             }
         }
@@ -170,20 +139,11 @@ pipeline {
   ]
 }"""
                     writeFile file: 'task-def.json', text: taskDef
-
-                    if (isUnix()) {
-                        sh '''
-                        echo "====== TASK DEF ======"
-                        cat task-def.json
-                        echo "======================"
-                        '''
-                    } else {
-                        bat '''
-                        echo ====== TASK DEF ======
-                        type task-def.json
-                        echo ======================
-                        '''
-                    }
+                    sh '''
+                    echo "====== TASK DEF ======"
+                    cat task-def.json
+                    echo "======================"
+                    '''
                 }
             }
         }
@@ -199,18 +159,17 @@ pipeline {
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
                     script {
-                        def cmd = 'aws ecs register-task-definition --region %s --cli-input-json file://task-def.json --query taskDefinition.revision --output text'
-                        if (isUnix()) {
-                            env.TASK_REVISION = sh(
-                                script: "aws ecs register-task-definition --region \$AWS_REGION --cli-input-json file://task-def.json --query 'taskDefinition.revision' --output text",
-                                returnStdout: true
-                            ).trim()
-                        } else {
-                            env.TASK_REVISION = bat(
-                                script: "@aws ecs register-task-definition --region %AWS_REGION% --cli-input-json file://task-def.json --query taskDefinition.revision --output text",
-                                returnStdout: true
-                            ).trim()
-                        }
+                        env.TASK_REVISION = sh(
+                            script: '''
+                            aws ecs register-task-definition \
+                                --region $AWS_REGION \
+                                --cli-input-json file://task-def.json \
+                                --query 'taskDefinition.revision' \
+                                --output text
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
                         echo "Registered Task Revision: ${env.TASK_REVISION}"
                     }
                 }
@@ -227,25 +186,16 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
-                    script {
-                        if (isUnix()) {
-                            sh """
-                            echo "Deploying task def: ${env.TASK_FAMILY}:${env.TASK_REVISION}"
-                            aws ecs update-service \
-                                --region ${env.AWS_REGION} \
-                                --cluster ${env.ECS_CLUSTER} \
-                                --service ${env.ECS_SERVICE} \
-                                --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} \
-                                --health-check-grace-period-seconds 120 \
-                                --force-new-deployment
-                            """
-                        } else {
-                            bat """
-                            echo Deploying task def: ${env.TASK_FAMILY}:${env.TASK_REVISION}
-                            aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER} --service ${env.ECS_SERVICE} --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} --health-check-grace-period-seconds 120 --force-new-deployment
-                            """
-                        }
-                    }
+                    sh """
+                    echo "Deploying task def: ${env.TASK_FAMILY}:${env.TASK_REVISION}"
+                    aws ecs update-service \
+                        --region ${env.AWS_REGION} \
+                        --cluster ${env.ECS_CLUSTER} \
+                        --service ${env.ECS_SERVICE} \
+                        --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} \
+                        --health-check-grace-period-seconds 120 \
+                        --force-new-deployment
+                    """
                 }
             }
         }
@@ -260,22 +210,13 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
-                    script {
-                        if (isUnix()) {
-                            sh '''
-                            echo "Waiting for ECS service to stabilize..."
-                            aws ecs wait services-stable \
-                                --region $AWS_REGION \
-                                --cluster $ECS_CLUSTER \
-                                --services $ECS_SERVICE
-                            '''
-                        } else {
-                            bat '''
-                            echo Waiting for ECS service to stabilize...
-                            aws ecs wait services-stable --region %AWS_REGION% --cluster %ECS_CLUSTER% --services %ECS_SERVICE%
-                            '''
-                        }
-                    }
+                    sh '''
+                    echo "Waiting for ECS service to stabilize..."
+                    aws ecs wait services-stable \
+                        --region $AWS_REGION \
+                        --cluster $ECS_CLUSTER \
+                        --services $ECS_SERVICE
+                    '''
                 }
             }
         }
@@ -283,19 +224,10 @@ pipeline {
         // ───────────── Cleanup Old Docker Images ─────────────
         stage('Cleanup') {
             steps {
-                script {
-                    if (isUnix()) {
-                        sh '''
-                        echo "Removing dangling images..."
-                        docker image prune -f
-                        '''
-                    } else {
-                        bat '''
-                        echo Removing dangling images...
-                        docker image prune -f
-                        '''
-                    }
-                }
+                sh '''
+                echo "Removing dangling images..."
+                docker image prune -f
+                '''
             }
         }
     }
@@ -314,6 +246,7 @@ pipeline {
             echo "❌ Pipeline failed on branch: ${env.GIT_BRANCH_NAME}"
         }
         always {
+            // Clean workspace after every build
             cleanWs()
         }
     }
