@@ -5,6 +5,8 @@ pipeline {
 
     options {
         timestamps()
+        disableConcurrentBuilds()               // prevent overlapping deployments
+        buildDiscarder(logRotator(numToKeepStr: '10')) // keep last 10 builds
     }
 
     environment {
@@ -18,14 +20,26 @@ pipeline {
         ECS_SERVICE = 'my-service'
         TASK_FAMILY = 'my-task'
 
-        // IAM roles — must exist in your AWS account
         EXECUTION_ROLE_ARN = "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole"
         TASK_ROLE_ARN      = "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskRole"
 
         IMAGE_TAG = "${env.BUILD_NUMBER}"
+
+        // true when branch is main, master, or release/*
+        IS_DEPLOY_BRANCH = "${env.BRANCH_NAME ==~ /(main|master|release\/.*)/ ? 'true' : 'false'}"
     }
 
     stages {
+
+        // ───────────── Branch Info ─────────────
+        stage('Branch Info') {
+            steps {
+                script {
+                    echo "Branch: ${env.BRANCH_NAME}"
+                    echo "CD will run: ${env.IS_DEPLOY_BRANCH}"
+                }
+            }
+        }
 
         // ───────────── Build Jar File ─────────────
         stage('Build JAR') {
@@ -43,13 +57,16 @@ pipeline {
             steps {
                 sh '''
                 docker build -t my-app:$IMAGE_TAG .
-                docker images
                 '''
             }
         }
 
         // ───────────── Push to ECR ─────────────
+        // Only push if on a deploy branch
         stage('Push to ECR') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -72,10 +89,10 @@ pipeline {
 
         // ───────────── Prepare Task Definition ─────────────
         stage('Prepare Task Definition') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
             steps {
-                // Use a script block so Groovy variables expand correctly
-                // inside the heredoc; avoids shell-variable vs Groovy-variable
-                // confusion with $EXECUTION_ROLE_ARN etc.
                 script {
                     def taskDef = """{
   "family": "${env.TASK_FAMILY}",
@@ -96,12 +113,20 @@ pipeline {
         }
       ],
       "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/my-task",
+          "awslogs-region": "${env.AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
       "healthCheck": {
-        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/health || exit 1"],
+        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
-        "startPeriod": 10
+        "startPeriod": 60
       }
     }
   ]
@@ -118,6 +143,9 @@ pipeline {
 
         // ───────────── Register Task Definition ─────────────
         stage('Register Task Definition') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -143,14 +171,14 @@ pipeline {
 
         // ───────────── Deploy to ECS ─────────────
         stage('Deploy to ECS') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
-                    // Use env.TASK_REVISION (set in previous stage) via Groovy
-                    // interpolation — not shell $TASK_REVISION which won't be
-                    // exported to this sh step's environment.
                     sh """
                     echo "Deploying task def: ${env.TASK_FAMILY}:${env.TASK_REVISION}"
                     aws ecs update-service \
@@ -167,6 +195,9 @@ pipeline {
 
         // ───────────── Wait for Stable Deployment ─────────────
         stage('Wait for Deployment') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -182,14 +213,34 @@ pipeline {
                 }
             }
         }
+
+        // ───────────── Cleanup Old Docker Images ─────────────
+        stage('Cleanup') {
+            steps {
+                sh '''
+                echo "Removing dangling images..."
+                docker image prune -f
+                '''
+            }
+        }
     }
 
     post {
         success {
-            echo "✅ Deployment successful!"
+            script {
+                if (env.IS_DEPLOY_BRANCH == 'true') {
+                    echo "✅ Build + Deployment successful on branch: ${env.BRANCH_NAME}"
+                } else {
+                    echo "✅ Build successful on branch: ${env.BRANCH_NAME} (CD skipped — not a deploy branch)"
+                }
+            }
         }
         failure {
-            echo "❌ Deployment failed!"
+            echo "❌ Pipeline failed on branch: ${env.BRANCH_NAME}"
+        }
+        always {
+            // Clean workspace after every build
+            cleanWs()
         }
     }
 }
