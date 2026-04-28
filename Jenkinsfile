@@ -88,7 +88,7 @@ pipeline {
                       ],
                       "essential": true,
                       "healthCheck": {
-                        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080 || exit 1"],
+                        "command": ["CMD-SHELL", "wget -q -O - http://localhost:8080/health || exit 1"],
                         "interval": 30,
                         "timeout": 5,
                         "retries": 3,
@@ -109,7 +109,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-jenkins-creds',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     script {
                         env.TASK_REVISION = sh(
@@ -133,7 +135,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-jenkins-creds',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
                     echo "Deploying to ECS..."
@@ -152,7 +156,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-jenkins-creds',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
                     echo "Waiting for ECS service to stabilize..."
