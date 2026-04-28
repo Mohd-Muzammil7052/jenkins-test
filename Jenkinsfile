@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'linux'
+    }
 
     options {
         timestamps()
@@ -23,14 +25,14 @@ pipeline {
         // ───────────── Clean Docker ─────────────
         stage('Clean Docker') {
             steps {
-                bat 'docker system prune -f'
+                sh 'docker system prune -f'
             }
         }
 
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
-                bat 'docker build -t my-app:$IMAGE_TAG .'
+                sh 'docker build -t my-app:$IMAGE_TAG .'
             }
         }
 
@@ -41,7 +43,7 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-credentials'
                 ]]) {
-                    bat '''
+                    sh '''
                     aws ecr get-login-password --region $AWS_REGION \
                     | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
@@ -55,7 +57,7 @@ pipeline {
         // ───────────── Prepare Task Definition ─────────────
         stage('Prepare Task Definition') {
             steps {
-                bat '''
+                sh '''
                 cat > task-def.json <<EOF
                 {
                   "family": "$TASK_FAMILY",
@@ -97,7 +99,7 @@ pipeline {
                     credentialsId: 'aws-credentials'
                 ]]) {
                     script {
-                        env.TASK_REVISION = bat(
+                        env.TASK_REVISION = sh(
                             script: '''
                             aws ecs register-task-definition \
                             --cli-input-json file://task-def.json \
@@ -118,7 +120,7 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-credentials'
                 ]]) {
-                    bat '''
+                    sh '''
                     aws ecs update-service \
                     --cluster $ECS_CLUSTER \
                     --service $ECS_SERVICE \
@@ -136,7 +138,7 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-credentials'
                 ]]) {
-                    bat '''
+                    sh '''
                     aws ecs wait services-stable \
                     --cluster $ECS_CLUSTER \
                     --services $ECS_SERVICE
