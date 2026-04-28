@@ -158,6 +158,7 @@ pipeline {
                         --cluster ${env.ECS_CLUSTER} \
                         --service ${env.ECS_SERVICE} \
                         --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} \
+                        --health-check-grace-period-seconds 60 \
                         --force-new-deployment
                     """
                 }
