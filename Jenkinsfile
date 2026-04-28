@@ -22,17 +22,20 @@ pipeline {
 
     stages {
 
-        // ───────────── Clean Docker ─────────────
+        // ───────────── Clean Docker (non-fatal) ─────────────
         stage('Clean Docker') {
             steps {
-                sh 'docker system prune -f'
+                sh 'docker system prune -f || true'
             }
         }
 
         // ───────────── Build Docker Image ─────────────
         stage('Build Image') {
             steps {
-                sh 'docker build -t my-app:$IMAGE_TAG .'
+                sh '''
+                docker build -t my-app:$IMAGE_TAG .
+                docker images
+                '''
             }
         }
 
@@ -44,10 +47,14 @@ pipeline {
                     credentialsId: 'aws-credentials'
                 ]]) {
                     sh '''
+                    echo "Logging into ECR..."
                     aws ecr get-login-password --region $AWS_REGION \
                     | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
+                    echo "Tagging image..."
                     docker tag my-app:$IMAGE_TAG $ECR_REPO:$IMAGE_TAG
+
+                    echo "Pushing image..."
                     docker push $ECR_REPO:$IMAGE_TAG
                     '''
                 }
@@ -87,6 +94,8 @@ pipeline {
                   ]
                 }
                 EOF
+
+                cat task-def.json
                 '''
             }
         }
@@ -108,6 +117,8 @@ pipeline {
                             ''',
                             returnStdout: true
                         ).trim()
+
+                        echo "Registered Task Revision: ${env.TASK_REVISION}"
                     }
                 }
             }
@@ -121,6 +132,7 @@ pipeline {
                     credentialsId: 'aws-credentials'
                 ]]) {
                     sh '''
+                    echo "Deploying to ECS..."
                     aws ecs update-service \
                     --cluster $ECS_CLUSTER \
                     --service $ECS_SERVICE \
@@ -139,6 +151,7 @@ pipeline {
                     credentialsId: 'aws-credentials'
                 ]]) {
                     sh '''
+                    echo "Waiting for ECS service to stabilize..."
                     aws ecs wait services-stable \
                     --cluster $ECS_CLUSTER \
                     --services $ECS_SERVICE
