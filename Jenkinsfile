@@ -236,14 +236,14 @@ pipeline {
         success {
             script {
                 if (env.IS_DEPLOY_BRANCH == 'true') {
-                    echo "✅ Build + Deployment successful on branch: ${env.BRANCH_NAME}"
+                    echo "✅ Build + Deployment successful on branch: ${env.GIT_BRANCH_NAME}"
                 } else {
-                    echo "✅ Build successful on branch: ${env.BRANCH_NAME} (CD skipped — not a deploy branch)"
+                    echo "✅ Build successful on branch: ${env.GIT_BRANCH_NAME} (CD skipped — not a deploy branch)"
                 }
             }
         }
         failure {
-            echo "❌ Pipeline failed on branch: ${env.BRANCH_NAME}"
+            echo "❌ Pipeline failed on branch: ${env.GIT_BRANCH_NAME}"
         }
         always {
             // Clean workspace after every build
