@@ -6,13 +6,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class StartPage {
 
-    @GetMapping("/")
+    @GetMapping("/info")
     public String start(){
-        return "Welcome to Jenkins Start Page...";
+        return "Welcome to Jenkins Information Page...";
     }
 
     @GetMapping("/health")
     public String health() {
-        return "Application is healthy...";
+        return "Application is healthy to start...";
     }
 }
