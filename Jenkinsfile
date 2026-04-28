@@ -8,15 +8,19 @@ pipeline {
     }
 
     environment {
-        AWS_REGION = 'ap-south-1'
-        AWS_DEFAULT_REGION = 'ap-south-1' 
+        AWS_REGION         = 'ap-south-1'
+        AWS_DEFAULT_REGION = 'ap-south-1'
 
-        ACCOUNT_ID = '169984788524'
-        ECR_REPO = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/my-app"
+        ACCOUNT_ID  = '169984788524'
+        ECR_REPO    = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/my-app"
 
         ECS_CLUSTER = 'my-cluster'
         ECS_SERVICE = 'my-service'
         TASK_FAMILY = 'my-task'
+
+        // IAM roles — must exist in your AWS account
+        EXECUTION_ROLE_ARN = "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole"
+        TASK_ROLE_ARN      = "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskRole"
 
         IMAGE_TAG = "${env.BUILD_NUMBER}"
     }
@@ -69,18 +73,22 @@ pipeline {
         // ───────────── Prepare Task Definition ─────────────
         stage('Prepare Task Definition') {
             steps {
-                sh '''
-cat > task-def.json <<EOF
-{
-  "family": "$TASK_FAMILY",
+                // Use a script block so Groovy variables expand correctly
+                // inside the heredoc; avoids shell-variable vs Groovy-variable
+                // confusion with $EXECUTION_ROLE_ARN etc.
+                script {
+                    def taskDef = """{
+  "family": "${env.TASK_FAMILY}",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
+  "executionRoleArn": "${env.EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${env.TASK_ROLE_ARN}",
   "containerDefinitions": [
     {
       "name": "my-app",
-      "image": "$ECR_REPO:$IMAGE_TAG",
+      "image": "${env.ECR_REPO}:${env.IMAGE_TAG}",
       "portMappings": [
         {
           "containerPort": 8080,
@@ -97,13 +105,14 @@ cat > task-def.json <<EOF
       }
     }
   ]
-}
-EOF
-
-echo "====== TASK DEF ======"
-cat task-def.json
-echo "======================"
-                '''
+}"""
+                    writeFile file: 'task-def.json', text: taskDef
+                    sh '''
+                    echo "====== TASK DEF ======"
+                    cat task-def.json
+                    echo "======================"
+                    '''
+                }
             }
         }
 
@@ -118,10 +127,10 @@ echo "======================"
                         env.TASK_REVISION = sh(
                             script: '''
                             aws ecs register-task-definition \
-                            --region $AWS_REGION \
-                            --cli-input-json file://task-def.json \
-                            --query 'taskDefinition.revision' \
-                            --output text
+                                --region $AWS_REGION \
+                                --cli-input-json file://task-def.json \
+                                --query 'taskDefinition.revision' \
+                                --output text
                             ''',
                             returnStdout: true
                         ).trim()
@@ -139,15 +148,18 @@ echo "======================"
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-jenkins-DEP-team2-creds'
                 ]]) {
-                    sh '''
-                    echo "Deploying to ECS..."
+                    // Use env.TASK_REVISION (set in previous stage) via Groovy
+                    // interpolation — not shell $TASK_REVISION which won't be
+                    // exported to this sh step's environment.
+                    sh """
+                    echo "Deploying task def: ${env.TASK_FAMILY}:${env.TASK_REVISION}"
                     aws ecs update-service \
-                    --region $AWS_REGION \
-                    --cluster $ECS_CLUSTER \
-                    --service $ECS_SERVICE \
-                    --task-definition $TASK_FAMILY:$TASK_REVISION \
-                    --force-new-deployment
-                    '''
+                        --region ${env.AWS_REGION} \
+                        --cluster ${env.ECS_CLUSTER} \
+                        --service ${env.ECS_SERVICE} \
+                        --task-definition ${env.TASK_FAMILY}:${env.TASK_REVISION} \
+                        --force-new-deployment
+                    """
                 }
             }
         }
@@ -162,9 +174,9 @@ echo "======================"
                     sh '''
                     echo "Waiting for ECS service to stabilize..."
                     aws ecs wait services-stable \
-                    --region $AWS_REGION \
-                    --cluster $ECS_CLUSTER \
-                    --services $ECS_SERVICE
+                        --region $AWS_REGION \
+                        --cluster $ECS_CLUSTER \
+                        --services $ECS_SERVICE
                     '''
                 }
             }
